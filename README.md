@@ -10,10 +10,8 @@ activity/toxicity confound, on two Cell Painting screens (BBBC036v1, JUMP-CP).
 ```
 chemical_surrogate_study/
 ├── notebooks/     01-04, run in order (see below)
-├── data/          standardized per-compound tables written by notebooks 1-2
 ├── results/       CV scores, official-split results, Tukey HSD tables written by notebook 3
 ├── figures/       plots written by notebook 4
-├── tables/        LaTeX tables written by notebook 4
 ├── aime_style.py  shared matplotlib style used by notebook 4
 ├── environment.yml
 └── main.tex       the paper
