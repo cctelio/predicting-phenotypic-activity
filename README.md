@@ -15,7 +15,6 @@ chemical_surrogate_study/
 ├── figures/       plots written by notebook 4
 ├── plot_style.py  shared matplotlib style used by notebook 4
 ├── environment.yml
-└── main.tex       the paper
 ```
 
 ## Environment
