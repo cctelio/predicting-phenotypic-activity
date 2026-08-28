@@ -7,20 +7,31 @@ https://github.com/polaris-hub/polaris-method-comparison.
 
 ## Folder structure
 
+> **Note (post-implementation):** the original plan below called for one parameterized
+> `03_train_and_compare.ipynb` run once per dataset. In the final implementation this became three
+> separate notebooks — one per population, since JUMP-CP's `source_7` bioactive-library subset (see
+> the dedicated section below) was added as a third, independent population after this plan was
+> first written, and keeping each population's notebook self-contained turned out simpler than
+> parameterizing one notebook three ways.
+
 ```
 chemical_surrogate_study/
 ├── PLAN.md                              # this file
 ├── notebooks/
 │   ├── 01_prepare_bbbc036v1.ipynb
-│   ├── 02_prepare_jumpcp.ipynb
-│   ├── 03_train_and_compare.ipynb       # parameterized: run once per dataset
+│   ├── 02_prepare_jumpcp.ipynb            # also splits off the source_7 bioactive-library subset
+│   ├── 03_train_and_compare_bbbc036v1.ipynb
+│   ├── 03_train_and_compare_jumpcp.ipynb
+│   ├── 03_train_and_compare_jumpcp_bioactive.ipynb
 │   └── 04_plots_and_tables.ipynb
 ├── data/
 │   ├── bbbc036v1_standardized.parquet
-│   └── jumpcp_standardized.parquet
+│   ├── jumpcp_standardized.parquet
+│   └── jumpcp_bioactive_standardized.parquet
 ├── results/
 │   ├── bbbc036v1/
-│   └── jumpcp/
+│   ├── jumpcp/
+│   └── jumpcp_bioactive/
 └── figures/
 ```
 
@@ -38,8 +49,9 @@ One row per compound:
 | `batch_id` | grouping column for the plate/batch split (plate-batch for BBBC, `Metadata_Source` for JUMP) |
 | `cloome_split` | `train`/`val`/`test` for BBBC, null for JUMP |
 
-Structure-derived representations (MorganFP, PhysChem, LogP, chemical k-medoids split) are
-deterministic functions of `SMILES` and are computed on the fly in notebook 3, not stored here.
+Structure-derived representations (MorganFP, PhysChem, LogP, chemical Butina-clustering split —
+see note below) are deterministic functions of `SMILES` and are computed on the fly in notebook 3,
+not stored here.
 
 ### Note: toxicity is only tested among active compounds
 
@@ -73,7 +85,10 @@ Direct port of the validated logic already run in `notebooks/08_activity_confoun
 4. `is_active`: `copairs` permutation test, **cosine** distance, full (cell-count-excluded) TVN profile, `neg_sameby=["plate"]`.
 5. **Toxicity — restricted to active compounds + negative controls** (revised for consistency with notebook 2's new design, see the schema note above): `copairs` permutation test, **euclidean** distance (cosine on a scalar collapses to `sign(x)` — degenerate, this was the bug caught earlier that gave a false 99.5% toxic rate), on the per-plate-DMSO-centered cell-count value alone, run only on wells belonging to `is_active == True` compounds + sampled DMSO controls. Compounds with `is_active == False` get `is_active_and_toxic = False` / `toxicity_map,toxicity_p = null` by construction, not tested. (This changes nothing about BBBC's already-computed, already-analyzed results in practice — only 3/10,680 compounds were previously found inactive-and-toxic, so restricting the test doesn't lose meaningful information — but it makes both notebooks methodologically identical, which is worth having for the paper's methods section.)
 6. `is_active_and_toxic` = `is_active AND is_toxic`; `is_active_not_toxic` = `is_active AND NOT is_toxic`.
-7. `batch_id`: connected components of co-occurring plates (compounds span 2-8 replicate plates, not confined to one — 95 batches).
+7. `batch_id`: mode-plate assignment — each compound is assigned the single plate it has the most
+   replicate wells on (compounds can span several plates; this picks the one it appears on most).
+   (An earlier design considered connected components of co-occurring plates instead; mode-plate
+   assignment is what was actually implemented.)
 8. Aggregate morphology to compound level (median across wells), write `data/bbbc036v1_standardized.parquet`.
 
 No open questions — this is a direct, already-validated reuse, with the one small toxicity-scoping revision above.
@@ -180,7 +195,27 @@ which is exactly why it's deferred until after the population is fixed.
 
 **Note for during build**: verify `jumpcp_cloome_bioactivity_cache.parquet` / `jumpcp_cellclip_cache.parquet` (already cached, 26.8MB each) are keyed by SMILES and cover the subsampled population before reusing — recompute only the gap if some SMILES are missing.
 
-## Notebook 3: `03_train_and_compare.ipynb` — run once per dataset (parameterized by dataset path/name)
+## `source_7` bioactive-library subset — third population (added after this plan was first written)
+
+Of JUMP-CP's twelve data-generating sources, ten have compound-level activity $p$-values via
+JUMP-RR (the other two run only CRISPR/ORF genetic perturbations). One of these, `source_7`, is a
+curated library of already-characterized bioactive compounds screened at $0.625\,\mu M$ rather than
+the $10\,\mu M$ used by every other source — its activity rate reflects this (roughly twice the
+rate of any other source). Mixing it into the main JUMP-CP population would let its different
+compound population and concentration confound the batch-generalization split, so notebook 2
+splits it off into its own standardized table (`data/jumpcp_bioactive_standardized.parquet`) and
+notebook 3 has a dedicated variant (`03_train_and_compare_jumpcp_bioactive.ipynb`) that evaluates
+it exactly like the two main populations, except the batch/plate split uses plate rather than
+source as the grouping variable (`source_7` spans only one source, so source is no longer a
+meaningful grouping there). This gives a third, independent replication population — screened at a
+different concentration and structurally distinct from both BBBC036v1 and the rest of JUMP-CP —
+used in the paper to check that the representation ranking isn't an artifact of one screen's
+chemistry or experimental design. Notebook 4's `plot4_bioactive_replication` is this comparison.
+
+## Notebook 3: `03_train_and_compare_{bbbc036v1,jumpcp,jumpcp_bioactive}.ipynb`
+
+> Originally planned as a single `03_train_and_compare.ipynb` parameterized by dataset; implemented
+> as three separate, self-contained notebooks instead (see the folder-structure note above).
 
 ### 3.1 Representations
 - `Morphology`: `morph_0...morph_N` from the standardized dataset, used as-is.
@@ -188,15 +223,25 @@ which is exactly why it's deferred until after the population is fixed.
 - `PhysChem`: full RDKit `Descriptors.CalcMolDescriptors` set — from `SMILES`.
 - `LogP`: Crippen LogP, standalone — from `SMILES`.
 - `CLOOME`, `CellCLIP`: reuse cached embeddings (BBBC: `bbbc036v1_cloome_bioactivity_cache.parquet` / `bbbc036v1_cellclip_cache.parquet`; JUMP: the two files above), keyed by SMILES, dedup cache index before reindexing (known duplicate-SMILES issue, already solved once).
-- `MLP_CLOOME_arch`: **new**, per your request. Input = Morgan fingerprint matching CLOOME's own encoder spec (radius=3, 1024 bits, **chiral=True** — deliberately different from the plain `MorganFP` condition above, since the point is testing CLOOME's architecture minus its contrastive pretraining, not re-testing the same fingerprint). Architecture: 4 hidden layers (matching `CLOOME_MLP_HIDDEN_LAYERS=4`), dropout 0.4, AdamW weight_decay=1e-4, early stopping on validation AUC, `pos_weight` for class imbalance — the exact regularization recipe already validated via the 9-combo sensitivity sweep (all 9 combos landed within a tight 0.028 AUC band, so this choice is not a lucky pick).
-- `CellCount` excluded throughout (defines the toxic label — circular).
+- `MLP_CLOOME_arch` (renamed `MLP` downstream in notebook 4): input = Morgan fingerprint matching CLOOME's own encoder spec (radius=3, 1024 bits, **chiral=True** — deliberately different from the plain `MorganFP` condition above, since the point is testing CLOOME's architecture minus its contrastive pretraining, not re-testing the same fingerprint). Architecture: 4 hidden layers (matching `CLOOME_MLP_HIDDEN_LAYERS=4`), dropout 0.4, AdamW weight_decay=1e-4, early stopping on validation AUC, `pos_weight` for class imbalance — the exact regularization recipe already validated via the 9-combo sensitivity sweep (all 9 combos landed within a tight 0.028 AUC band, so this choice is not a lucky pick).
+- `CellCount`: **originally planned to be excluded throughout** (it defines the toxicity label —
+  circular), but ended up computed alongside every other representation for diagnostic purposes.
+  It is not part of the paper's reported comparisons — notebook 4 never plots or tables it.
+
+**Six representations are actually reported in the paper**: PhysChem, LogP, MorganFP, CLOOME,
+CellCLIP, and the not-pretrained MLP control. `Morphology` appears only as a reference "ceiling"
+row in the full `table1_consolidated` results table (not in any ranking/task-difficulty figure),
+and `CellCount` doesn't appear anywhere in the paper.
 
 No concatenation ablations (per earlier decision).
 
 ### 3.2 Splits
-- **Chemical**: k-medoids (manual PAM, k=80 for BBBC; scale k proportionally for JUMP's ~24-25k, e.g. k≈185-190) on Tanimoto distance over `MorganFP`, clusters bin-packed into 5 folds.
-- **Plate/batch**: GroupKFold on `batch_id`, bin-packed into 5 folds.
-- **CLOOME official**: only for BBBC (`cloome_split` populated).
+- **Chemical**: ~~k-medoids~~ **Butina clustering** (`rdkit.ML.Cluster.Butina`) on the pairwise
+  Tanimoto distance matrix over `MorganFP`, distance cutoff **0.35** (chosen empirically to give
+  balanced folds), whole clusters (not individual compounds) allocated to folds.
+- **Plate/batch**: GroupKFold on `batch_id` — mode-plate for BBBC036v1 and for JUMP-CP's
+  `source_7` bioactive-library subset, mode-source for JUMP-CP's main population.
+- **CLOOME official**: only for BBBC036v1 (`cloome_split` populated).
 
 ### 3.3 Statistics — corrected per [Ash2025]
 
@@ -214,14 +259,29 @@ Linear logistic regression (all representations) + the one `MLP_CLOOME_arch` con
 ### 3.5 Outputs → `results/<dataset>/`
 - `cv_scores.csv` (25 rows × representation × target × split — the raw repeated-measures samples)
 - `tukey_hsd.csv` (pairwise comparisons with corrected p-values, RM-ANOVA-based CI, Cohen's d)
-- `official_split_bootstrap.csv` (BBBC only)
+- `official_split_train_val_test.csv`, `official_split_results.csv`, and
+  `official_split_bootstrap_tukey.csv` (BBBC036v1 only — train/val/test AUROC, per-representation
+  results, and the bootstrap-based Tukey HSD comparison on the official split, respectively)
 
 ## Notebook 4: `04_plots_and_tables.ipynb`
 
-Reads both datasets' `results/` folders. Implements [Ash2025] Guidelines 4's recommended visualizations:
-- **Simultaneous confidence interval plot** (Figure 7 style): forest plot per target/split, best-performing representation in blue with dashed reference lines, statistically-equivalent representations in gray, significantly-worse in red.
-- **MCSim plot** (Figure 8 style): heatmap of all pairwise mean differences, sorted by average performance, color = effect size (Cohen's d), star annotations = significance level.
-- Summary tables (Table 1 style): CI of pairwise mean differences, one table per target/split/dataset.
+> The forest-plot / MCSim-heatmap visualizations originally planned below (per [Ash2025]
+> Guidelines 4) were superseded during implementation by a simpler set of grouped bar charts with
+> bootstrap/CV confidence-interval error bars, one per paper figure. What was actually built:
+
+Reads `results/{bbbc036v1,jumpcp,jumpcp_bioactive}/` and writes:
+- **`plot1_leakage_train_val_test`**: train/validation/test AUROC for CLOOME, CellCLIP, and
+  PhysChem on BBBC036v1's official split — the pretraining-leakage figure.
+- **`plot2_representation_ranking`**: three-panel representation ranking (BBBC036v1 official split;
+  JUMP-CP chemical split; JUMP-CP batch split), all six reported representations.
+- **`plot3_task_difficulty`**: mean AUROC by target (active; active & toxic; active, not toxic)
+  for all six representations, on BBBC036v1's official split and JUMP-CP's chemical split.
+- **`plot4_bioactive_replication`**: the same representation-ranking comparison repeated on
+  JUMP-CP's `source_7` bioactive-library subset (chemical and plate splits) — the third-population
+  replication check.
+- **`table1_consolidated`** (`.csv` and `.tex`): full per-representation, per-target AUROC (with
+  CIs) across BBBC036v1's official split and JUMP-CP's chemical split, including `Morphology` as a
+  reference row.
 
 ---
 
@@ -231,5 +291,7 @@ You asked me to just decide these rather than keep them open:
 
 1. **JUMP final population: all active (~12,220, toxicity-tested) ∪ inactive padding matching the active count 1:1 (~12,000, untested/defaulted non-toxic)**, giving a roughly class-balanced population of ~24-25k total, per Notebook 2 Step 5. Inactive padding is stratified proportionally across `Metadata_Source`. **Flag if you want a different active:inactive ratio.**
 2. **Cell-count column: `Nuclei_Number_Object_Number`** — confirmed present in the Interpretable product's schema (along with `Cytoplasm_Number_Object_Number`). Note: this column is already variance/MAD-normalized by JUMP, not raw counts; we still apply our own per-plate DMSO-centering on top for methodological consistency with BBBC.
-3. **k-medoids k for JUMP: ~190.** Proportional scaling from BBBC's k=80 at ~10,680 compounds (ratio ≈ 1 cluster per 133 compounds) applied to ~24-25k compounds gives ≈184-190; will finalize the exact number once the final population size is known after Step 5.
+3. ~~k-medoids k for JUMP: ~190.~~ **Superseded**: the chemical split ended up using Butina
+   clustering (distance cutoff 0.35) instead of k-medoids for both data sets, so this doesn't apply
+   — see §3.2.
 4. **Yes, consult the paper's reference GitHub implementation** (`polaris-hub/polaris-method-comparison`) for the exact RM-ANOVA-into-Tukey-HSD mechanics before coding notebook 3's statistics — cheap (just reading their code), and removes any doubt about matching the paper's actual procedure rather than my own reconstruction of it.

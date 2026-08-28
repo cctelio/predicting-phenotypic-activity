@@ -1,9 +1,9 @@
-"""AIME Lab plot style — palette + matplotlib rcParams.
+"""Shared plot style — palette + matplotlib rcParams.
 
 Usage:
-    from aime_style import AIME_PALETTE, AIME_RCPARAMS, add_panel_label
+    from plot_style import PALETTE, RCPARAMS, add_panel_label
     import matplotlib.pyplot as plt
-    plt.rcParams.update(AIME_RCPARAMS)
+    plt.rcParams.update(RCPARAMS)
 """
 
 DEEP_TEAL = "#2D4F54"
@@ -13,14 +13,14 @@ FOREST_GREEN = "#5A9448"
 MUTED_PLUM = "#9E4A78"
 DARK_SLATE = "#3A3D4A"
 
-AIME_PALETTE = [
+PALETTE = [
     DEEP_TEAL, ROYAL_PURPLE, SOFT_LAVENDER,
     FOREST_GREEN, MUTED_PLUM, DARK_SLATE,
 ]
 
 import matplotlib.pyplot as plt
 
-AIME_RCPARAMS = {
+RCPARAMS = {
     # Typography
     "font.family": "sans-serif",
     "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"],
@@ -34,7 +34,7 @@ AIME_RCPARAMS = {
     "axes.labelsize": 11,
     "axes.spines.top": True,
     "axes.spines.right": True,
-    "axes.prop_cycle": plt.cycler("color", AIME_PALETTE),
+    "axes.prop_cycle": plt.cycler("color", PALETTE),
     "axes.grid": False,
 
     # Ticks
